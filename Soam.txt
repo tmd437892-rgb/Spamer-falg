@@ -1,0 +1,1022 @@
+<head><meta charset="UTF-8"></head><pre style="caret-color: rgb(255, 255, 255); color: rgb(255, 255, 255); font-style: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: auto; text-align: start; text-indent: 0px; text-transform: none; widows: auto; word-spacing: 0px; -webkit-tap-highlight-color: rgba(26, 26, 26, 0.3); -webkit-text-size-adjust: auto; -webkit-text-stroke-width: 0px; text-decoration: none; overflow-wrap: break-word; white-space: pre-wrap;">import discord
+from discord.ext import commands
+from discord import app_commands
+import os
+import json
+import asyncio
+from colorama import init, Fore
+
+init(autoreset=True)
+
+# Owner ID
+OWNER_ID = 1516389568465731645
+
+# Server ID (extracted from invite link)
+AUTHORIZED_SERVER_ID = 1234567890  # Replace with your actual server ID
+
+# Admin users file
+ADMIN_USERS_FILE = "admin_users.json"
+
+# Authorized users file
+AUTHORIZED_USERS_FILE = "authorized_users.json"
+
+# ---------------- TOKEN SYSTEM ---------------- #
+def save_token(token):
+    with open("token.json", "w") as file:
+        json.dump({"TOKEN": token}, file)
+
+def load_token():
+    try:
+        with open("token.json", "r") as file:
+            data = json.load(file)
+            return data.get("TOKEN")
+    except:
+        return None
+
+# ---------------- ADMIN SYSTEM ---------------- #
+def load_admin_users():
+    """Load admin users from JSON file"""
+    if os.path.exists(ADMIN_USERS_FILE):
+        try:
+            with open(ADMIN_USERS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_admin_users(users):
+    """Save admin users to JSON file"""
+    with open(ADMIN_USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def add_admin_user(user_id):
+    """Add a user to admin list"""
+    users = load_admin_users()
+    if user_id not in users:
+        users.append(user_id)
+        save_admin_users(users)
+        print(f"âœ… User {user_id} added to admin users")
+    return user_id in users
+
+def is_admin(user_id):
+    """Check if user is admin"""
+    users = load_admin_users()
+    return user_id in users or user_id == OWNER_ID
+
+def remove_admin_user(user_id):
+    """Remove a user from admin list"""
+    users = load_admin_users()
+    if user_id in users:
+        users.remove(user_id)
+        save_admin_users(users)
+        print(f"âœ… User {user_id} removed from admin users")
+    return user_id not in users
+
+# ---------------- AUTHORIZED USERS SYSTEM (DEPRECATED - Using Admin System) ---------------- #
+def load_authorized_users():
+    """Load authorized users from JSON file"""
+    if os.path.exists(AUTHORIZED_USERS_FILE):
+        try:
+            with open(AUTHORIZED_USERS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_authorized_users(users):
+    """Save authorized users to JSON file"""
+    with open(AUTHORIZED_USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def add_authorized_user(user_id):
+    """Add a user to authorized list"""
+    users = load_authorized_users()
+    if user_id not in users:
+        users.append(user_id)
+        save_authorized_users(users)
+        print(f"âœ… User {user_id} added to authorized users")
+    return user_id in users
+
+def is_authorized(user_id):
+    """Check if user is authorized (admin or owner)"""
+    return is_admin(user_id)
+
+def remove_authorized_user(user_id):
+    """Remove a user from authorized list"""
+    users = load_authorized_users()
+    if user_id in users:
+        users.remove(user_id)
+        save_authorized_users(users)
+        print(f"âœ… User {user_id} removed from authorized users")
+    return user_id not in users
+
+def is_user_in_server(user_id, guild):
+    """Check if user is member of the server"""
+    return guild.get_member(user_id) is not None
+
+# ---------------- UI ---------------- #
+def display_logo():
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print(Fore.BLUE + "=== DISCORD BOT ===")
+
+def display_status(connected):
+    print(Fore.GREEN + "Status: Connected" if connected else Fore.RED + "Status: Disconnected")
+
+def token_management():
+    display_logo()
+    print(Fore.CYAN + "1. Set new token")
+    print("2. Load previous token\n")
+
+    choice = input("Choose (1/2): ")
+
+    if choice == "1":
+        token = input("Enter token: ")
+        save_token(token)
+        return token
+    elif choice == "2":
+        return load_token()
+    else:
+        return None
+
+# ---------------- BOT SETUP ---------------- #
+intents = discord.Intents.default()
+intents.message_content = True
+intents.dm_messages = True
+intents.members = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Track users who have received welcome message
+welcome_sent = set()
+
+# ============ MODAL FOR ADD ADMIN ============ #
+class AddAdminModal(discord.ui.Modal, title="âž• Add Admin User"):
+    """Modal for adding admin users"""
+    user_id = discord.ui.TextInput(
+        label="Enter User ID",
+        placeholder="e.g., 123456789",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="âŒ OWNER ONLY",
+                description=f"Only the bot owner can use this!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            admins = load_admin_users()
+            if user_id in admins:
+                embed = discord.Embed(
+                    title="â„¹ï¸ ALREADY ADMIN",
+                    description=f"User `{user_id}` is already an admin!",
+                    color=discord.Color.blue()
+                )
+                embed.set_footer(text="Developed by Saham")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            add_admin_user(user_id)
+            embed = discord.Embed(
+                title="âœ… ADMIN ADDED",
+                description=f"User `{user_id}` has been made an admin!",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description="Invalid User ID! Please enter numbers only.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ MODAL FOR REMOVE ADMIN ============ #
+class RemoveAdminModal(discord.ui.Modal, title="âž– Remove Admin User"):
+    """Modal for removing admin users"""
+    user_id = discord.ui.TextInput(
+        label="Enter User ID to Remove",
+        placeholder="e.g., 123456789",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="âŒ OWNER ONLY",
+                description=f"Only the bot owner can use this!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            if remove_admin_user(user_id):
+                embed = discord.Embed(
+                    title="âœ… ADMIN REMOVED",
+                    description=f"User `{user_id}` has been removed from admin!",
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text="Developed by Saham")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="â„¹ï¸ NOT FOUND",
+                    description=f"User `{user_id}` was not in the admin list!",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Developed by Saham")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description="Invalid User ID! Please enter numbers only.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ MODAL FOR ADD AUTH ============ #
+class AddAuthModal(discord.ui.Modal, title="âž• Add Authorized User"):
+    """Modal for adding authorized users"""
+    user_id = discord.ui.TextInput(
+        label="Enter User ID",
+        placeholder="e.g., 123456789",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="âŒ OWNER ONLY",
+                description=f"Only the bot owner can use this!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            users = load_authorized_users()
+            if user_id in users:
+                embed = discord.Embed(
+                    title="â„¹ï¸ ALREADY AUTHORIZED",
+                    description=f"User `{user_id}` is already authorized!",
+                    color=discord.Color.blue()
+                )
+                embed.set_footer(text="Developed by Saham")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+
+            add_authorized_user(user_id)
+            embed = discord.Embed(
+                title="âœ… USER AUTHORIZED",
+                description=f"User `{user_id}` has been authorized to use the bot!",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description="Invalid User ID! Please enter numbers only.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ MODAL FOR REMOVE AUTH ============ #
+class RemoveAuthModal(discord.ui.Modal, title="âž– Remove Authorized User"):
+    """Modal for removing authorized users"""
+    user_id = discord.ui.TextInput(
+        label="Enter User ID to Remove",
+        placeholder="e.g., 123456789",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if interaction.user.id != OWNER_ID:
+            embed = discord.Embed(
+                title="âŒ OWNER ONLY",
+                description=f"Only the bot owner can use this!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+
+            if remove_authorized_user(user_id):
+                embed = discord.Embed(
+                    title="âœ… USER REMOVED",
+                    description=f"User `{user_id}` has been removed from authorization!",
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text="Developed by Saham")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                embed = discord.Embed(
+                    title="â„¹ï¸ NOT FOUND",
+                    description=f"User `{user_id}` was not in the authorized list!",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="Developed by Saham")
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description="Invalid User ID! Please enter numbers only.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ MODAL FOR DM SPAM USER (2 FIELDS ONLY) ============ #
+class DMSpamUserModal(discord.ui.Modal, title="ðŸ’Œ DM Spam User"):
+    """Modal for DM spam user - 2 fields only"""
+    user_id = discord.ui.TextInput(
+        label="Target User ID",
+        placeholder="e.g., 123456789",
+        required=True,
+        min_length=1,
+        max_length=20
+    )
+
+    message = discord.ui.TextInput(
+        label="Spam Content",
+        placeholder="Enter your message here...",
+        required=True,
+        min_length=1,
+        max_length=2000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        # Check if user is authorized
+        if not is_authorized(interaction.user.id):
+            embed = discord.Embed(
+                title="âŒ UNAUTHORIZED",
+                description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        try:
+            user_id = int(self.user_id.value.strip())
+            message_text = self.message.value.strip()
+
+            # Fetch user
+            user = await bot.fetch_user(user_id)
+
+            # Show spam count selection buttons
+            view = DMSpamCountButton(user_id, message_text, user)
+
+            embed = discord.Embed(
+                title="ðŸ’Œ DM SPAM",
+                description=f"**Target:** {user.mention}\n**Message:** `{message_text}`",
+                color=discord.Color.red()
+            )
+            embed.add_field(name="ðŸ“Š SELECT SPAM COUNT", value="Choose how many times to spam", inline=False)
+            embed.set_footer(text="Developed by Saham")
+
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+        except ValueError:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description="Invalid User ID! Please check your input.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except discord.NotFound:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description=f"User with ID `{self.user_id.value}` not found!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="âŒ ERROR",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ DM SPAM COUNT BUTTON VIEW (PRIVATE/EPHEMERAL) ============ #
+class DMSpamCountButton(discord.ui.View):
+    def __init__(self, user_id, message, target_user):
+        super().__init__(timeout=60)
+        self.user_id = user_id
+        self.message = message
+        self.target_user = target_user
+        self.bot = bot
+
+    @discord.ui.button(label="Spam x1", style=discord.ButtonStyle.green)
+    async def dm_spam_1x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            for i in range(1):
+                await self.target_user.send(self.message)
+
+            embed = discord.Embed(
+                title="âœ… 1X Spam Sent",
+                description=f"Message sent to {self.target_user.mention}",
+                color=discord.Color.green()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="âŒ Error",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Spam x10", style=discord.ButtonStyle.blurple)
+    async def dm_spam_10x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            for i in range(10):
+                await self.target_user.send(self.message)
+
+            embed = discord.Embed(
+                title="âœ… 10X Spam Sent",
+                description=f"Messages sent to {self.target_user.mention}",
+                color=discord.Color.blurple()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="âŒ Error",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Spam x16", style=discord.ButtonStyle.red)
+    async def dm_spam_16x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            for i in range(16):
+                await self.target_user.send(self.message)
+
+            embed = discord.Embed(
+                title="âœ… 16X Spam Sent",
+                description=f"Messages sent to {self.target_user.mention}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            embed = discord.Embed(
+                title="âŒ Error",
+                description=f"{str(e)}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ BUTTON VIEW WITH SPAM OPTIONS (EPHEMERAL/PRIVATE) ============ #
+class SpamButton(discord.ui.View):
+    def __init__(self, message, delay=0):
+        super().__init__(timeout=60)
+        self.message = message
+        self.delay = delay
+
+    @discord.ui.button(label="Spam x1", style=discord.ButtonStyle.green)
+    async def spam_1x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        for i in range(1):
+            await interaction.followup.send(self.message)
+            if self.delay &gt; 0:
+                await asyncio.sleep(self.delay)
+
+        embed = discord.Embed(
+            title="âœ… 1X Spam Complete!",
+            description=f"Message: `{self.message}`\nDelay: {self.delay}s",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Spam x10", style=discord.ButtonStyle.blurple)
+    async def spam_10x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        for i in range(10):
+            await interaction.followup.send(self.message)
+            if self.delay &gt; 0:
+                await asyncio.sleep(self.delay)
+
+        embed = discord.Embed(
+            title="âœ… 10X Spam Complete!",
+            description=f"Message: `{self.message}`\nDelay: {self.delay}s",
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Spam x16", style=discord.ButtonStyle.red)
+    async def spam_16x(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        for i in range(16):
+            await interaction.followup.send(self.message)
+            if self.delay &gt; 0:
+                await asyncio.sleep(self.delay)
+
+        embed = discord.Embed(
+            title="âœ… 16X Spam Complete!",
+            description=f"Message: `{self.message}`\nDelay: {self.delay}s",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ============ EMBED SPAM BUTTON VIEW (EPHEMERAL/PRIVATE) ============ #
+class SpamEmbedButton(discord.ui.View):
+    def __init__(self, embed, link, delay=0):
+        super().__init__(timeout=60)
+        self.embed = embed
+        self.link = link
+        self.delay = delay
+
+    @discord.ui.button(label="SPAM NOW (16X)", style=discord.ButtonStyle.red)
+    async def spam_embed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        for i in range(16):
+            embed_copy = self.embed.copy()
+            embed_copy.description = f"{self.embed.description}\n\nðŸ”— **Link:** {self.link}"
+            await interaction.followup.send(embed=embed_copy)
+            if self.delay &gt; 0:
+                await asyncio.sleep(self.delay)
+
+        embed_response = discord.Embed(
+            title="âœ… 16X Embed Spam Complete!",
+            description="Your spam has been sent successfully",
+            color=discord.Color.red()
+        )
+        embed_response.set_footer(text="Developed by Saham")
+        await interaction.followup.send(embed=embed_response, ephemeral=True)
+
+# ============ CUSTOMIZED SPAMRAID COMMAND (WORKS IN DM AND SERVER) ============ #
+@bot.tree.command(name="spamraid", description="Spam message in DM or Server (with optional delay)")
+@app_commands.describe(
+    message="Message to spam",
+    delay="Delay between messages in seconds (0-5)"
+)
+async def spamraid(interaction: discord.Interaction, message: str, delay: int = 0):
+    # Validate delay
+    if delay &lt; 0 or delay &gt; 5:
+        embed = discord.Embed(
+            title="âŒ ERROR",
+            description="Delay must be between 0 and 5 seconds!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    # Check if user is authorized
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="âŒ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`\n\nAsk the owner to authorize you.",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    # Check if user is in authorized server (only if NOT in DM)
+    if not isinstance(interaction.channel, discord.DMChannel):
+        authorized_guild = bot.get_guild(AUTHORIZED_SERVER_ID)
+        if authorized_guild and not is_user_in_server(interaction.user.id, authorized_guild):
+            embed = discord.Embed(
+                title="âŒ NOT IN SERVER",
+                description="You must be a member of the authorized server to use this bot!\n\nJoin: https://discord.gg/2CpWhmjyV",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+    # Create view with spam buttons
+    view = SpamButton(message, delay)
+
+    embed = discord.Embed(
+        title="ðŸ’¥ SPAM TEXT",
+        description=f"**Message:** `{message}`\n**Delay:** {delay}s",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="ðŸ“Š SELECT SPAM COUNT", value="Click button below", inline=False)
+    embed.set_footer(text="Developed by Saham")
+
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+# ============ DM SPAM USER COMMAND WITH MODAL ============ #
+@bot.tree.command(name="dmspamuser", description="Direct spam to any user's DM - Opens Modal Form")
+async def dmspamuser(interaction: discord.Interaction):
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="âŒ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!\n**Your ID:** `{interaction.user.id}`",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = DMSpamUserModal()
+    await interaction.response.send_modal(modal)
+
+# ============ EMBED SPAM COMMAND ============ #
+@bot.tree.command(name="spamembed", description="Spam embed with invite link")
+@app_commands.describe(
+    title="Embed title",
+    description="Embed description",
+    color="Embed color (red/blue/green/yellow)",
+    link="Invite link to spam",
+    delay="Delay between messages in seconds (0-5)"
+)
+async def spamembed(
+    interaction: discord.Interaction,
+    title: str,
+    description: str,
+    color: str = "red",
+    link: str = "https://discord.gg/gWsJJxnGUT",
+    delay: int = 0
+):
+    # Validate delay
+    if delay &lt; 0 or delay &gt; 5:
+        embed = discord.Embed(
+            title="âŒ ERROR",
+            description="Delay must be between 0 and 5 seconds!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    # Check if user is authorized
+    if not is_authorized(interaction.user.id):
+        embed = discord.Embed(
+            title="âŒ UNAUTHORIZED",
+            description=f"You are not authorized to use this bot!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    # Check if user is in authorized server (if not in DM)
+    if not isinstance(interaction.channel, discord.DMChannel):
+        authorized_guild = bot.get_guild(AUTHORIZED_SERVER_ID)
+        if authorized_guild and not is_user_in_server(interaction.user.id, authorized_guild):
+            embed = discord.Embed(
+                title="âŒ NOT IN SERVER",
+                description=f"You must be a member of the authorized server to use this bot!",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="Developed by Saham")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+    # Color mapping
+    color_map = {
+        "red": discord.Color.red(),
+        "blue": discord.Color.blue(),
+        "green": discord.Color.green(),
+        "yellow": discord.Color.yellow(),
+        "purple": discord.Color.purple(),
+        "orange": discord.Color.orange(),
+    }
+
+    selected_color = color_map.get(color.lower(), discord.Color.red())
+
+    # Create embed
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=selected_color
+    )
+    embed.set_footer(text="Developed by Saham")
+
+    # Create view with spam button
+    view = SpamEmbedButton(embed, link, delay)
+
+    await interaction.response.send_message(
+        f"**Preview** (Delay: {delay}s):",
+        embed=embed,
+        view=view,
+        ephemeral=True
+    )
+
+# ============ ADMIN COMMANDS WITH MODAL ============ #
+@bot.tree.command(name="admin", description="Add admin user (Owner only) - Opens Modal Form")
+async def admin_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="âŒ OWNER ONLY",
+            description=f"Only the bot owner can use this command!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = AddAdminModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="removeadmin", description="Remove admin user (Owner only) - Opens Modal Form")
+async def removeadmin_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="âŒ OWNER ONLY",
+            description=f"Only the bot owner can use this command!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = RemoveAdminModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="showadmins", description="Show all admin users (Owner only)")
+async def showadmins_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="âŒ OWNER ONLY",
+            description=f"Only the bot owner can use this command!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    admins = load_admin_users()
+    if admins:
+        admin_list = "\n".join([f"â€¢ `{uid}`" for uid in admins])
+        embed = discord.Embed(
+            title="âœ… ADMIN USERS",
+            description=admin_list,
+            color=discord.Color.green()
+        )
+    else:
+        embed = discord.Embed(
+            title="â„¹ï¸ NO ADMINS",
+            description="No admin users are currently set!",
+            color=discord.Color.red()
+        )
+
+    embed.set_footer(text="Developed by Saham")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ============ OLD AUTH COMMANDS (FOR BACKWARD COMPATIBILITY) ============ #
+@bot.tree.command(name="addauth", description="Add authorized user (Owner only) - Opens Modal Form")
+async def addauth_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="âŒ OWNER ONLY",
+            description=f"Only the bot owner can use this command!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = AddAuthModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="removeauth", description="Remove authorized user (Owner only) - Opens Modal Form")
+async def removeauth_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="âŒ OWNER ONLY",
+            description=f"Only the bot owner can use this command!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    modal = RemoveAuthModal()
+    await interaction.response.send_modal(modal)
+
+@bot.tree.command(name="authlist", description="Show authorized users (Owner only)")
+async def authlist_command(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        embed = discord.Embed(
+            title="âŒ OWNER ONLY",
+            description=f"Only the bot owner can use this command!",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="Developed by Saham")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    users = load_authorized_users()
+    if users:
+        user_list = "\n".join([f"â€¢ `{uid}`" for uid in users])
+        embed = discord.Embed(
+            title="âœ… AUTHORIZED USERS",
+            description=user_list,
+            color=discord.Color.green()
+        )
+    else:
+        embed = discord.Embed(
+            title="â„¹ï¸ NO AUTHORIZED USERS",
+            description="No users are currently authorized!",
+            color=discord.Color.red()
+        )
+
+    embed.set_footer(text="Developed by Saham")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ============ HELP COMMAND ============ #
+@bot.tree.command(name="help", description="Show available commands")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="ðŸ’¥ SPAM BOT - COMMANDS",
+        description="Available commands for this bot",
+        color=discord.Color.red()
+    )
+
+    embed.add_field(
+        name="/spamraid",
+        value="Spam text message (works in DM &amp; Server)\n**Usage:** `/spamraid message:hi delay:0`\n**Options:** 1X, 10X, 16X\n**Delay:** 0-5 seconds",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/dmspamuser",
+        value="Spam text message to any user's DM (Opens Modal Form)\n**Usage:** `/dmspamuser` â†’ Fill form\n**Options:** 1X, 10X, 16X",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/spamembed",
+        value="Spam embed with invite link (Server)\n**Usage:** `/spamembed title:Title description:Desc`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/admin",
+        value="Add admin user (Owner only - Opens Modal Form)\n**Usage:** `/admin` â†’ Fill User ID",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/removeadmin",
+        value="Remove admin user (Owner only - Opens Modal Form)\n**Usage:** `/removeadmin` â†’ Fill User ID",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/showadmins",
+        value="Show all admin users (Owner only)",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/help",
+        value="Show this help message",
+        inline=False
+    )
+
+    embed.set_footer(text="Developed by Saham")
+
+    await interaction.response.send_message(embed=embed)
+
+# ============ DM MESSAGE EVENT ============ #
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if isinstance(message.channel, discord.DMChannel):
+        user_id = message.author.id
+
+        if user_id not in welcome_sent:
+            welcome_sent.add(user_id)
+
+            if is_authorized(user_id):
+                embed = discord.Embed(
+                    title="ðŸ‘‹ Welcome to Spam Bot!",
+                    description="âœ… You are **ADMIN** - Use commands below",
+                    color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="ðŸ‘‹ Welcome to Spam Bot!",
+                    description="âŒ You are **NOT ADMIN** - Ask owner to make you admin!",
+                    color=discord.Color.red()
+                )
+
+            embed.add_field(
+                name="ðŸ“ /spamraid",
+                value="Spam messages in DM or Server (1X/10X/16X)",
+                inline=False
+            )
+
+            embed.add_field(
+                name="ðŸ’Œ /dmspamuser",
+                value="Spam messages to any user's DM (Modal Form)",
+                inline=False
+            )
+
+            embed.add_field(
+                name="ðŸŽ¨ /spamembed",
+                value="Send embed with link",
+                inline=False
+            )
+
+            embed.add_field(
+                name="â“ /help",
+                value="Show all commands",
+                inline=False
+            )
+
+            embed.set_footer(text="Developed by Saham")
+
+            await message.author.send(embed=embed)
+
+    await bot.process_commands(message)
+
+# ============ EVENTS ============ #
+@bot.event
+async def on_ready():
+    display_logo()
+    display_status(True)
+    print(Fore.YELLOW + f"Logged in as {bot.user}")
+
+    try:
+        await bot.tree.sync()
+        print(Fore.GREEN + "Slash commands synced")
+    except Exception as e:
+        print(Fore.RED + f"Sync error: {e}")
+
+# ============ MAIN ============ #
+if __name__ == "__main__":
+    TOKEN = MTUxNjM5MTQxNjIzNzAwMjgxNA.GceVIo.UV5wF_FYs68-jDl9AFnliHduEqlsExtxOJynyM()
+
+    if TOKEN:
+        try:
+            bot.run(MTUxNjM5MTQxNjIzNzAwMjgxNA.GceVIo.UV5wF_FYs68-jDl9AFnliHduEqlsExtxOJynyM)
+        except discord.LoginFailure:
+            print("Invalid token!")
+    else:
+        print("MTUxNjM5MTQxNjIzNzAwMjgxNA.GceVIo.UV5wF_FYs68-jDl9AFnliHduEqlsExtxOJynyM.")</pre>
